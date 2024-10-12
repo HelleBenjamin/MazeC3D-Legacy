@@ -161,7 +161,15 @@ void processInput(GLFWwindow *window, world *W) { // process movement and other 
         printf("X: %.2f, Y: %.2f\n", W->playerX, W->playerY);
     }
 }
-
+void devConsole(){ //dev console
+    while(true){
+        printf("> ");
+        char command[100];
+        scanf("%s", command);
+        if (strcmp(command, "exit") == 0) exit(0);
+        if (strcmp(command, "dev") == 0) printf("Version: %s\n", VERSION);
+    }
+}
 
 int main() {
 

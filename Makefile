@@ -5,7 +5,7 @@ CC = gcc
 CFLAGS = -Wall -lm -Iinclude
 
 ifeq ($(OS), Windows_NT)
-  LIBS = -Lwin32 -lglfw3 -lopengl32 -lgdi32
+  LIBS = -Lwin32 -lglfw3 -lopengl32 -lgdi32 -Lwin32
   INCLUDES = -Iwin32
 else
   LIBS = -Llinux -lglfw -lGL
