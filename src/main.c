@@ -21,26 +21,58 @@
     Version: 0.1.0a
 */
 
-#define VERSION "0.1.0a"
+#define VERSION "0.1.0b"
 
-#define SCREEN_WIDTH 800
-#define SCREEN_HEIGHT 600
+int SCREEN_WIDTH = 800;
+int SCREEN_HEIGHT = 600;
 
 #define WORLD_SIZE 196 // world size in squares(now 14x14)
 
+#define COLOR_WHITE 1.0f, 1.0f, 1.0f
+#define COLOR_RED 1.0f, 0.0f, 0.0f
+#define COLOR_GREEN 0.0f, 1.0f, 0.0f
+#define COLOR_BLUE 0.0f, 0.0f, 1.0f
+
 typedef struct {
-    bool worldmap[WORLD_SIZE]; // 1 = wall, 0 = air
-    float playerX, playerY; //player pos
+    int worldmap[WORLD_SIZE]; // 1 = wall, 0 = air
+    float playerX, playerY, playerZ; //player pos
     float dirX, dirY; //player direction
     float planeX, planeY; //2D raycaster projection plane
     float moveSpeed; //movement speed
     float rotSpeed; //rotation speed
+    float vertSpeed; //vertical speed
+    float viewOffset; //view offset
 } world;
+
+typedef struct {
+    float r, g, b;
+} color;
+
+color colors[4] = {{COLOR_WHITE}, {COLOR_RED}, {COLOR_GREEN}, {COLOR_BLUE}};
+
+
+/*  Map colors:
+
+    0 = air
+    1 = white
+    2 = red
+    3 = green
+    4 = blue
+
+
+*/
+
+color getSideWallColor(color c) {
+    if (c.r - 0.3f > 0) c.r -= 0.3f;
+    if (c.g - 0.3f > 0) c.g -= 0.3f;
+    if (c.b - 0.3f > 0) c.b -= 0.3f;
+    return c;
+}
 
 void genWorld(world *W){ // generate random world
     int j = (int)sqrt(WORLD_SIZE);
     for (int i = 0; i < WORLD_SIZE; i++) {
-        W->worldmap[i] = rand() % 2;
+        W->worldmap[i] = rand() % 4;
         if (i == j) {
             printf("\n");
             j += (int)sqrt(WORLD_SIZE);
@@ -60,8 +92,11 @@ void initWorld(world *W){ // initialize the world before the game starts
     W->dirY = 0.0f;
     W->planeX = 0.0f;
     W->planeY = 0.66f;
-    W->moveSpeed = 0.03f;
-    W->rotSpeed = 0.02f; 
+    W->playerZ = 0.0f;
+    W->moveSpeed = 1.3f;
+    W->rotSpeed = 1.5f;
+    W->vertSpeed = 1.5f;
+    W->viewOffset = 0.0f;
 }
 
 void mainRenderer(world *W){ // the main renderer of the game
@@ -72,6 +107,8 @@ void mainRenderer(world *W){ // the main renderer of the game
 
         int mapX = (int)W->playerX; // player coords -> map coords
         int mapY = (int)W->playerY;
+
+        int colorType = 0; // ray color
 
         float sideDistX;
         float sideDistY;
@@ -103,26 +140,28 @@ void mainRenderer(world *W){ // the main renderer of the game
             if (sideDistX < sideDistY) {
                 sideDistX += deltaDistX;
                 mapX += stepX;
-                side = 0;
+                side = 0; // hit vertical wall
             } else {
                 sideDistY += deltaDistY;
                 mapY += stepY;
-                side = 1;
+                side = 1; // not hit vertical wall
             }
             if (W->worldmap[mapY * (int)sqrt(WORLD_SIZE) + mapX] > 0) hit = 1; 
+            colorType = W->worldmap[mapY * (int)sqrt(WORLD_SIZE) + mapX];
         }
 
         if (side == 0) perpWallDist = (mapX - W->playerX + (1 - stepX) / 2) / rayDirX; 
         else perpWallDist = (mapY - W->playerY + (1 - stepY) / 2) / rayDirY;
 
-        int lineHeight = (int)(SCREEN_HEIGHT / perpWallDist); //height of the line to draw on screen
-        int drawStart = -lineHeight / 2 + SCREEN_HEIGHT / 2;
+        int lineHeight = (int)(SCREEN_HEIGHT / perpWallDist);
+        int drawStart = -lineHeight / 2 + SCREEN_HEIGHT / 2 - (int)(W->playerZ * 100) - (int)(W->viewOffset * 100); 
         if (drawStart < 0) drawStart = 0;
-        int drawEnd = lineHeight / 2 + SCREEN_HEIGHT / 2;
+        int drawEnd = lineHeight / 2 + SCREEN_HEIGHT / 2 - (int)(W->playerZ * 100) - (int)(W->viewOffset * 100);
         if (drawEnd >= SCREEN_HEIGHT) drawEnd = SCREEN_HEIGHT - 1;
+        
 
-        glColor3f(1.0f, 1.0f, 1.0f); // white, makes front walls brighter
-        if (side == 1) glColor3f(0.7f, 0.7f, 0.7f); // light gray, makes side walls darker
+        glColor3f(colors[colorType].r, colors[colorType].g, colors[colorType].b); // white, makes front walls brighter
+        if (side == 1) glColor3f(getSideWallColor(colors[colorType]).r, getSideWallColor(colors[colorType]).g, getSideWallColor(colors[colorType]).b); // light gray, makes side walls darker
 
         glBegin(GL_LINES); // draw the line
         glVertex2i(x, drawStart);
@@ -131,34 +170,56 @@ void mainRenderer(world *W){ // the main renderer of the game
     }
 }
 
-void processInput(GLFWwindow *window, world *W) { // process movement and other inputs
+void processInput(GLFWwindow *window, world *W, float deltaTime) { // process movement and other inputs
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { // forward
-        if (W->worldmap[(int)(W->playerY) * (int)sqrt(WORLD_SIZE) + (int)(W->playerX + W->dirX * W->moveSpeed)] == 0) W->playerX += W->dirX * W->moveSpeed;
-        if (W->worldmap[(int)(W->playerY + W->dirY * W->moveSpeed) * (int)sqrt(WORLD_SIZE) + (int)(W->playerX)] == 0) W->playerY += W->dirY * W->moveSpeed;
+        float newX = W->playerX + W->dirX * W->moveSpeed * deltaTime;
+        float newY = W->playerY + W->dirY * W->moveSpeed * deltaTime;
+        if (W->worldmap[(int)(newY) * (int)sqrt(WORLD_SIZE) + (int)(newX)] == 0) {
+            W->playerX = newX;
+            W->playerY = newY;
+        }
     }
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) { // backward
-        if (W->worldmap[(int)(W->playerY) * (int)sqrt(WORLD_SIZE) + (int)(W->playerX - W->dirX * W->moveSpeed)] == 0) W->playerX -= W->dirX * W->moveSpeed;
-        if (W->worldmap[(int)(W->playerY - W->dirY * W->moveSpeed) * (int)sqrt(WORLD_SIZE) + (int)(W->playerX)] == 0) W->playerY -= W->dirY * W->moveSpeed;
+        float newX = W->playerX - W->dirX * W->moveSpeed * deltaTime;
+        float newY = W->playerY - W->dirY * W->moveSpeed * deltaTime;
+        if (W->worldmap[(int)(newY) * (int)sqrt(WORLD_SIZE) + (int)(newX)] == 0) {
+            W->playerX = newX;
+            W->playerY = newY;
+        }
     }
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { // left
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { // left
         float oldDirX = W->dirX;
-        W->dirX = W->dirX * cos(W->rotSpeed) - W->dirY * sin(W->rotSpeed);
-        W->dirY = oldDirX * sin(W->rotSpeed) + W->dirY * cos(W->rotSpeed);
+        W->dirX = W->dirX * cos(-W->rotSpeed * deltaTime) - W->dirY * sin(-W->rotSpeed * deltaTime);
+        W->dirY = oldDirX * sin(-W->rotSpeed * deltaTime) + W->dirY * cos(-W->rotSpeed * deltaTime);
         float oldPlaneX = W->planeX;
-        W->planeX = W->planeX * cos(W->rotSpeed) - W->planeY * sin(W->rotSpeed);
-        W->planeY = oldPlaneX * sin(W->rotSpeed) + W->planeY * cos(W->rotSpeed);
+        W->planeX = W->planeX * cos(-W->rotSpeed * deltaTime) - W->planeY * sin(-W->rotSpeed * deltaTime);
+        W->planeY = oldPlaneX * sin(-W->rotSpeed * deltaTime) + W->planeY * cos(-W->rotSpeed * deltaTime);
     }
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { // right
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { // right
         float oldDirX = W->dirX;
-        W->dirX = W->dirX * cos(-W->rotSpeed) - W->dirY * sin(-W->rotSpeed);
-        W->dirY = oldDirX * sin(-W->rotSpeed) + W->dirY * cos(-W->rotSpeed);
+        W->dirX = W->dirX * cos(W->rotSpeed * deltaTime) - W->dirY * sin(W->rotSpeed * deltaTime);
+        W->dirY = oldDirX * sin(W->rotSpeed * deltaTime) + W->dirY * cos(W->rotSpeed * deltaTime);
         float oldPlaneX = W->planeX;
-        W->planeX = W->planeX * cos(-W->rotSpeed) - W->planeY * sin(-W->rotSpeed);
-        W->planeY = oldPlaneX * sin(-W->rotSpeed) + W->planeY * cos(-W->rotSpeed);
+        W->planeX = W->planeX * cos(W->rotSpeed * deltaTime) - W->planeY * sin(W->rotSpeed * deltaTime);
+        W->planeY = oldPlaneX * sin(W->rotSpeed * deltaTime) + W->planeY * cos(W->rotSpeed * deltaTime);
     }
+
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) { // view downwards
+        W->playerZ += W->vertSpeed * deltaTime;
+        W->viewOffset = W->playerZ * 2;
+    }
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) { // view upwards
+        W->playerZ -= W->vertSpeed * deltaTime;
+        W->viewOffset = W->playerZ * 2;
+    }
+    if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) { // reset view
+        W->playerZ = 0;
+        W->viewOffset = 0;
+    }
+    
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1); // close the game
     if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS) { // print current player position
-        printf("X: %.2f, Y: %.2f\n", W->playerX, W->playerY);
+        printf("X: %.2f, Y: %.2f Z: %.2f\n", W->playerX, W->playerY, W->playerZ);
     }
 }
 void devConsole(){ //dev console
@@ -171,11 +232,17 @@ void devConsole(){ //dev console
     }
 }
 
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) { // TODO: fix
+    SCREEN_HEIGHT = height;
+    SCREEN_WIDTH = width;
+    glViewport(0, 0, width, height);
+}
+
 int main() {
 
     printf("MazeC 3D Legacy %s\n", VERSION);
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2); // opengl 2.1
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 
     if (!glfwInit()) {
@@ -203,15 +270,21 @@ int main() {
 
     printf("OpenGL version: %s\n", glGetString(GL_VERSION));
 
+    float lastFrame, currentFrame, deltaTime = 0.0f;
+    glfwSwapInterval(1); // enable vsync
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
     while (!glfwWindowShouldClose(window)) { // main game loop
         glClear(GL_COLOR_BUFFER_BIT); // clear the screen
+        currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
 
         mainRenderer(&TestWorld); // call the main renderer
-        processInput(window, &TestWorld); // check if any input
+        processInput(window, &TestWorld, deltaTime); // check if any input
 
         glfwSwapBuffers(window);
         glfwPollEvents();
-        glfwSwapInterval(1); // enable vsync
     }
 
     glfwTerminate();
